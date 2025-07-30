@@ -10,51 +10,9 @@ from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_
 from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_
 from unitree_sdk2py.utils.crc import CRC
 from unitree_sdk2py.utils.thread import RecurrentThread
-from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem
+from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QTextEdit
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import QTimer
-
-class G1JointIndex:
-    # 왼쪽 다리 (Left Leg)
-    LeftHipPitch = 0
-    LeftHipRoll = 1
-    LeftHipYaw = 2
-    LeftKnee = 3
-    LeftAnklePitch = 4
-    LeftAnkleRoll = 5
-
-    # 오른쪽 다리 (Right Leg)
-    RightHipPitch = 6
-    RightHipRoll = 7
-    RightHipYaw = 8
-    RightKnee = 9
-    RightAnklePitch = 10
-    RightAnkleRoll = 11
-
-    # Waist (허리)
-    WaistYaw = 12
-    WaistRoll = 13
-    WaistPitch = 14
-
-    # 왼쪽 팔 (Left Arm)
-    LeftShoulderPitch = 15
-    LeftShoulderRoll = 16
-    LeftShoulderYaw = 17
-    LeftElbow = 18
-    LeftWristRoll = 19
-    LeftWristPitch = 20
-    LeftWristYaw = 21
-
-    # 오른쪽 팔 (Right Arm)
-    RightShoulderPitch = 22
-    RightShoulderRoll = 23
-    RightShoulderYaw = 24
-    RightElbow = 25
-    RightWristRoll = 26
-    RightWristPitch = 27
-    RightWristYaw = 28
-
-    kNotUsedJoint = 29 # NOTE: Weight
 
 class RealSenseViewer(QWidget):
     def __init__(self):
@@ -70,7 +28,7 @@ class RealSenseViewer(QWidget):
         # GUI 레이아웃
         self.setWindowTitle("RealSense RGB + Depth Viewer")
         self.resize(1365, 768)
-        
+
         # 좌측: RGB 및 Depth 영상, 우측: 모터 상태
         layout = QHBoxLayout()  # 수평 레이아웃
         left_layout = QVBoxLayout()  # RGB와 Depth 영상
@@ -81,6 +39,12 @@ class RealSenseViewer(QWidget):
         self.depth_label = QLabel("Depth 영상")
         left_layout.addWidget(self.rgb_label)
         left_layout.addWidget(self.depth_label)
+
+        # 공의 거리와 위치를 표시할 QTextEdit
+        self.distance_text = QTextEdit()
+        self.distance_text.setReadOnly(True)  # 텍스트를 수정할 수 없게 설정
+        self.distance_text.setPlainText("Distance to blue ball: N/A")  # 초기 텍스트 설정
+        left_layout.addWidget(self.distance_text)
 
         # 모터 상태 테이블 표시
         self.motor_status_table = QTableWidget()
@@ -114,8 +78,36 @@ class RealSenseViewer(QWidget):
             cv2.COLORMAP_JET
         )
 
+        # 파란색 공 마스크 처리
+        hsv_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2HSV)
+        lower_blue = np.array([100, 150, 50])
+        upper_blue = np.array([140, 255, 255])
+        blue_mask = cv2.inRange(hsv_image, lower_blue, upper_blue)
+
+        # 공의 중심 좌표 찾기
+        contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(largest_contour) > 100:
+                # 중심점 계산
+                M = cv2.moments(largest_contour)
+                if M["m00"] != 0:
+                    cX = int(M["m10"] / M["m00"])
+                    cY = int(M["m01"] / M["m00"])
+
+                    # 공의 거리 계산
+                    depth_value = depth_image[cY, cX]  # 해당 픽셀의 깊이값
+                    distance = depth_value * 0.001  # 단위 변환 (mm -> m)
+
+                    # 거리 출력
+                    self.distance_text.setPlainText(f"Distance to blue ball: {distance:.2f} meters")
+
+                    cv2.circle(color_image, (cX, cY), 10, (0, 255, 0), -1)  # 공의 중심을 초록색으로 표시
+
         rgb_qimg = QImage(color_image.data, color_image.shape[1], color_image.shape[0],
                           color_image.strides[0], QImage.Format_BGR888)
+
         depth_qimg = QImage(depth_colormap.data, depth_colormap.shape[1], depth_colormap.shape[0],
                             depth_colormap.strides[0], QImage.Format_BGR888)
 
