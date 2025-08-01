@@ -78,6 +78,36 @@ class Custom:
         self.pipeline.start(self.config)
         print("[INFO] RealSense Camera Started.")
 
+    def move_to_idle_pose(self, duration=2.0):
+        print("[INFO] Moving to idle pose...")
+        t = 0.0
+        rate = self.control_dt_
+        steps = int(duration / rate)
+
+        for _ in range(steps):
+            if self.low_state is None:
+                time.sleep(rate)
+                continue
+
+            for joint in self.target_right_arm:
+                current = self.low_state.motor_state[joint].q
+                target = self.idle_pose[joint]
+                self.target_right_arm[joint] = (1 - 0.05) * current + 0.05 * target
+
+            # 명령 전송
+            self.low_cmd.motor_cmd[G1JointIndex.kNotUsedJoint].q = 1
+            for joint, target_q in self.target_right_arm.items():
+                self.low_cmd.motor_cmd[joint].tau = 0.0
+                self.low_cmd.motor_cmd[joint].q   = target_q
+                self.low_cmd.motor_cmd[joint].dq  = 0.0
+                self.low_cmd.motor_cmd[joint].kp  = self.kp
+                self.low_cmd.motor_cmd[joint].kd  = self.kd
+
+            self.low_cmd.crc = self.crc.Crc(self.low_cmd)
+            self.arm_sdk_publisher.Write(self.low_cmd)
+            time.sleep(rate)
+        print("[INFO] Idle pose reached.")
+
     def Init(self):
         self.arm_sdk_publisher = ChannelPublisher("rt/arm_sdk", LowCmd_)
         self.arm_sdk_publisher.Init()
@@ -86,12 +116,17 @@ class Custom:
         self.lowstate_subscriber.Init(self.LowStateHandler, 10)
 
     def Start(self):
+        while not self.first_update_low_state:
+            time.sleep(0.1)
+
+        # 차렷 자세로 천천히 이동
+        self.move_to_idle_pose(duration=2.0)
+
         self.lowCmdWriteThreadPtr = RecurrentThread(
             interval=self.control_dt_, target=self.LowCmdWrite, name="control"
         )
-        while not self.first_update_low_state:
-            time.sleep(1)
         self.lowCmdWriteThreadPtr.Start()
+
 
     def LowStateHandler(self, msg: LowState_):
         self.low_state = msg
@@ -177,4 +212,3 @@ if __name__ == "__main__":
 
     while True:
         time.sleep(1)
-
